@@ -1,0 +1,207 @@
+#!/bin/bash
+
+# Autor:
+# Grupa:
+
+# afisarea operatiilor posibile
+_help_ops() {
+	echo "Valid operations with options:"
+	echo "    top_contributors [n]"
+	echo "    added_lines [file]"
+	echo "    deleted_lines [file]"
+	echo "    touched_files [author]"
+	echo "    diff_braches branch1 branch2"
+}
+
+# ajutor
+_help() {
+	echo "Usage:"
+	echo "    ./stats repository [-n maxcommits] operation [options]"
+
+	_help_ops
+}
+
+# statistica top contributors
+_top_contributors() {
+
+	# daca avem limitare la numarul de commituri
+	if [[ "$1" == "-c" ]]; then
+		shift
+		MAXCOMMITOPTS="-n $1"
+		shift
+	fi
+
+	# daca avem limitare la numarul de autori
+	if [[ -n "$1" ]]; then
+		#shift
+		MAXAUTHOROPTS="-n $1"
+	fi
+
+	# generez doua fisiere temporare in care voi redirecta output
+	TMPFILE1=$(mktemp)
+	TMPFILE2=$(mktemp)
+
+	# ma asigur ca sunt pe branch-ul master
+	git checkout master > /dev/null 2>&1
+	# caut toti autorii diferiti
+	git log $MAXCOMMITOPTS| grep "^Author" | sed -e 's/Author: //g' | sort -u >$TMPFILE1
+
+	# pentru fiecare autor numar cate commituri a facut
+	while read author; do 
+		nr_comm=`git log $MAXCOMMITOPTS | grep "^Author: $author" | wc -l`
+        echo $nr_comm $author >> $TMPFILE2
+	done < $TMPFILE1
+
+	#sortez dupa numarul de commituri
+	cat $TMPFILE2 | sort -n -k 1,1 -r | head $MAXAUTHOROPTS
+
+	#sterg fisierele temporare
+	rm $TMPFILE1 $TMPFILE2
+}
+
+_process_lines() {
+	# limitare la numarul de commituri
+	if [[ "$1" == "-c" ]]; then
+		shift 
+		MAXCOMMITOPS="-n $1"
+		shift
+	fi
+	# daca sunt 2 argumente atunci avem fisierul si operatia : 1 - added, 2 - deleted
+	if [[ "$#" -eq 2 ]]; then
+		GFILE=" $1"
+		shift
+	fi
+
+	TMPFILE=$(mktemp)
+	# ma asigur ca sunt pe master
+	git checkout master > /dev/null 2>&1
+	# numarul de linii modificate pentru fiecare fisier
+	git log $MAXCOMMITOPS  --numstat | sed -e 's/\t/ /g' | grep -E "^[[:digit:]].*$GFILE" | cut -f $1 -d " " > $TMPFILE
+	# calculez suma
+	sum=0
+	while read nr; do
+		sum=$((sum+nr))
+	done <$TMPFILE
+	echo $sum
+	rm $TMPFILE
+}
+
+_touched_files() {
+
+	# daca avem limitare la numarul de commituri
+	if [[ "$1" == "-c" ]]; then
+		shift
+		MAXCOMMITOPTS="-n $1"
+		shift
+	fi
+
+	# daca avem limitare la numarul de autori
+	if [[ -n "$1" ]]; then
+		AUTHOR="$1"
+	fi
+    # ma asigur ca sunt pe master
+	git checkout master > /dev/null 2>&1
+	TMPFILE=$(mktemp)
+	# caut fisierele "atinse"
+	git log  $MAXCOMMITOPTS --author=$AUTHOR --name-status | grep -e ^[MAD][[:space:]] | sed -e 's/\t/ /g' | cut -f 2 -d " " > $TMPFILE
+	# elimin duplicatele
+	cat $TMPFILE | sort -u | wc -l
+	rm $TMPFILE
+
+}
+
+_rotate() {
+	# functie auxiliara care imi afiseaza toate argumentele mai putin primul
+	shift
+	echo $@
+}
+
+_commit_info() {
+	# functia afiseaza toate commiturile din branchul primit ca argument
+	BRANCH="$1"
+	FILE="$2"
+	git checkout -f $BRANCH >/dev/null 2>&1
+	echo "Commits only in branch $BRANCH:"
+	while read commit_hash; do
+		_rotate `git show --oneline $commit_hash | head -1 | sed -e 's/^[^ ]+//g'`
+	done<$FILE
+}
+
+_diff_branches() {
+	TMPFILE1=$(mktemp)
+	TMPFILE2=$(mktemp)                                                     
+	TMPFILE3=$(mktemp)                                                     
+	TMPFILE4=$(mktemp)                                                     
+
+	# afisez in fisierul 1 toate hashurile commiturile de pe primul branch
+	git checkout -f $1 >/dev/null 2>&1
+	git log | grep ^commit | cut -f 2 -d " " > $TMPFILE1
+
+	# afisez in fisierul 2 toate hashurile commiturile de pe al doilea branch
+	git checkout -f $2 >/dev/null 2>&1
+	git log | grep ^commit | cut -f 2 -d " " > $TMPFILE2
+
+	# commiturile doar din primul branch merg in fis.3
+	diff $TMPFILE1 $TMPFILE2 | grep -E "^[<]" | cut -f 2 -d " " > $TMPFILE3
+	# commiturile doar din primul branch merg in fis.4
+	diff $TMPFILE1 $TMPFILE2 | grep -E "^[>]" | cut -f 2 -d " " > $TMPFILE4
+
+	_commit_info $1 $TMPFILE3
+	echo
+	_commit_info $2 $TMPFILE4
+
+    rm $TMPFILE1 $TMPFILE2 $TMPFILE3 $TMPFILE4
+}
+
+# nr de parametri trebuie sa fie minim 2:
+# ./stats repository [-n maxcommits] operation [options]
+if [[ $# -lt 2 ]]; then
+	_help;
+	exit 1;
+fi
+
+# repozitoriul asupra caruia va opera scriptul
+REPO="$1"                 
+
+# daca se specifica numarul maxim de commituri de trebuie procesate
+if [[ $2 == "-n" ]]; then
+	if [[ $# -lt 4 ]]; then
+		_help;
+		exit 2;
+	fi
+	shift
+	MAXCOMMITS=$2
+	shift
+fi
+
+if [[ -n $MAXCOMMITS ]]; then
+	COMMOPTS="-c $MAXCOMMITS"
+fi
+
+OP=$2
+
+[[ -d $REPO ]] && cd $REPO || exit 3
+
+case $OP in
+	"top_contributors")
+		_top_contributors $COMMOPTS $3;;
+	"added_lines")
+		_process_lines $COMMOPTS $3 1;;
+	"deleted_lines")
+		_process_lines $COMMOPTS $3 2;;
+	"touched_files")
+		_touched_files $COMMOPTS $3;;
+	"diff_branches")
+		shift 2
+		if [[ "$#" -ne "2" ]]; then
+			echo "Must give branches!"
+			exit 4
+		fi
+		_diff_branches $1 $2;;
+	*)
+		echo -e "Unknown operation: \e[01;31m" $OP "\e[0m"
+		_help_ops;;
+esac
+
+# terminare cu succes
+exit 0
