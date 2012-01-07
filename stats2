@@ -1,0 +1,157 @@
+#!/bin/bash
+
+top_contributors() {
+	maxcommits="$1"
+	# daca este dat numarul de autori ce trebuie afisati
+	if [[ -n $2 ]];then
+		maxauthors="$2"
+	else
+		# head -c -0 afiseaza toate liniile
+		maxauthors="-0"
+	fi
+
+	# vreau sa fiu sigur ca ma aflu pe branchul master
+	git checkout -f master &>/dev/null
+	# creez un fisier temporar
+	temp_1=$(mktemp)
+	# afisez in acest fisier doar autorii cu numele complet
+	git log -n $maxcommits | sed -n 's/^Author:/&/p' | sed -re 's/^([^ ]+)//g' | sort -u > $temp_1
+
+	temp_2=$(mktemp)
+	# citesc toti autorii din primul fisier temporar
+	while read auth
+	do
+		nr=`git log -n $maxcommits | grep "^Author: $auth" | wc -l`
+		echo $nr $auth >> $temp_2
+	done<$temp_1
+    # sortez descrescator dupa numarul de commituri ale fiecarui autor
+	cat $temp_2 | sort -rn -k 1,1 | head -n $maxauthors
+    # curatenie
+	rm $temp_{1,2}
+}
+
+lines() {
+	# daca operatia e added trebuie sa selectez coloana 1 altfel coloana 2
+	[[ "$1" == "added" ]] && col=1 || col=2
+	# numarul maxim de commituri
+	maxcommits="$2"
+	shift 2
+	# vrefic daca am primit si fisierul drept argument
+	if [[ -n $1 ]];then
+		file="$1";
+	fi
+	temp=$(mktemp)
+	# vreau sa fiu sigur ca ma aflu pe branchul master
+	git checkout -f master &>/dev/null
+	# selectez doar una din coloanele care arata numarul de linii adaugate sau
+	# sterse pentru fiecare fisier, daca fisierul nu e specificat sunt alese 
+	# toate fisierele
+	git log -n $maxcommits --numstat | grep -E "^[0-9].*\s$file" | awk -F "\t" '{print $'$col'}' >> $temp
+
+	# suma totala a liniilor adaugata/sterse
+	lines=0
+	while read nr
+	do
+		lines=$((lines+nr))
+	done<$temp
+	#curatenie
+	rm $temp
+	echo $lines
+}
+
+touched_files() {
+	# nr maxim de commituri
+	maxcommits="$1"
+	# verif daca exista si parametrul autor
+	[[ -n $2 ]] && author="$2"
+	# vreau sa fiu sigur ca ma aflu pe branchul master
+	git checkout -f master &>/dev/null
+	temp=$(mktemp)
+	# caut randurile care incep cu literele M - modified, A - added sau 
+	# D - deleted, urmate de spatiu
+	git log -n $maxcommits --name-status --author="$author" | sed -nr 's/^[AMD]\s+(.+)/\1/p' > $temp
+	# iau fisierele unice
+	cat $temp | sort -u | wc -l
+	rm $temp
+
+}
+
+
+diff_branches() {
+	# trebuie sa fie doua branchuri
+	[[ "$#" == "2" ]] || exit 1
+	# creez trei fisiere temporare
+	temp_1=$(mktemp)
+	temp_2=$(mktemp)
+	temp_3=$(mktemp)
+	# ma duc pe primul branch, daca nu e nume valid termin programul
+	git checkout -f $1 &> /dev/null || exit 1
+	# toate commiturile de pe primul branch
+	git log --pretty=oneline > $temp_1
+	# ma duc pe al doilea branch
+	git checkout -f $2 &> /dev/null || exit 1
+	git log --pretty=oneline > $temp_2
+	# fac diferenta dintre ele
+	diff $temp_1 $temp_2 > $temp_3
+	echo "Commits only in branch $1:"
+	# in fisierul temp_3 liniile sunt de forma [<>] hash comment
+	# liniile care incep cu < sunt commiturile doar din primul branch
+	cat $temp_3 | grep "^<" | sed -re 's/< ([a-z0-9]+ )(.*)/\2/g'
+	echo 
+	echo "Commits only in branch $2:"
+	# liniile care incep cu > sunt commiturile doar din al doilea branch
+	cat $temp_3 | grep "^>" | sed -re 's/> ([a-z0-9]+ )(.*)/\2/g'
+	
+	rm $temp_1 $temp_2 $temp_3
+}
+
+main() {
+	# daca nu sunt cel putin ies
+	[[ $# -lt 2 ]] && exit 1
+	repository="$1"
+	# daca nu e un repository valid ies
+	cd $repository || exit 1
+	# deplasez parametrii la stanga
+	shift
+	# presupun initial ca numarul maxim de commituri nu va fi dat ca parametru
+	# si ii dau valoarea -1, git log -n -1 afiseaza toate commiturile
+	maxcommits="-1"
+	# daca se specifica optiunea -n
+	if [[ "$1" == "-n" ]];then
+		# trebuie sa am cel putin 3 parametri
+		[[ $# -lt 3 ]] && exit 1
+		# numarul maxim de commituri
+		maxcommits="$2"
+		# deplasez cu 2 pozitii parametrii la stanga
+		shift 2
+	fi
+	# primul parametru ramas este operatia
+	operation="$1"
+	shift
+	case "$operation" in
+		"top_contributors")
+			# calculez statistica top_contributors
+			top_contributors $maxcommits $@
+			;;
+		"added_lines")
+			# calculez statistica added_lines
+			lines added $maxcommits $@
+			;;
+		"deleted_lines")
+			# calculez statistica deleted_lines
+			lines deleted $maxcommits $@
+			;;
+		"touched_files")
+			# calculez statistica touched files
+			touched_files $maxcommits $@
+			;;
+		"diff_branches")
+			# calculez statistica diff_branches
+			diff_branches $@
+			;;
+		*)
+			exit 1;;
+	esac
+}
+
+main $@
