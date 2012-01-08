@@ -37,16 +37,14 @@ lines() {
 	maxcommits="$2"
 	shift 2
 	# vrefic daca am primit si fisierul drept argument
-	if [[ -n $1 ]];then
-		file="$1";
-	fi
+	[[ -n "$1" ]] && pattern="$1" || pattern=".*"
 	temp=$(mktemp)
 	# vreau sa fiu sigur ca ma aflu pe branchul master
 	git checkout -f master &>/dev/null
 	# selectez doar una din coloanele care arata numarul de linii adaugate sau
 	# sterse pentru fiecare fisier, daca fisierul nu e specificat sunt alese 
 	# toate fisierele
-	git log -n $maxcommits --numstat | grep -E "^[0-9].*\s$file" | awk -F "\t" '{print $'$col'}' >> $temp
+	git log -n $maxcommits --numstat | grep -E "^[0-9]+\s[0-9]+\s$pattern$" | awk -F "\t" "{print $"$col"}" > $temp
 
 	# suma totala a liniilor adaugata/sterse
 	lines=0
@@ -85,11 +83,11 @@ diff_branches() {
 	temp_2=$(mktemp)
 	temp_3=$(mktemp)
 	# ma duc pe primul branch, daca nu e nume valid termin programul
-	git checkout -f $1 &> /dev/null || exit 1
+	git checkout -f "$1" &> /dev/null || exit 1
 	# toate commiturile de pe primul branch
 	git log --pretty=oneline > $temp_1
 	# ma duc pe al doilea branch
-	git checkout -f $2 &> /dev/null || exit 1
+	git checkout -f "$2" &> /dev/null || exit 1
 	git log --pretty=oneline > $temp_2
 	# fac diferenta dintre ele
 	diff $temp_1 $temp_2 > $temp_3
@@ -105,53 +103,49 @@ diff_branches() {
 	rm $temp_1 $temp_2 $temp_3
 }
 
-main() {
-	# daca nu sunt cel putin ies
-	[[ $# -lt 2 ]] && exit 1
-	repository="$1"
-	# daca nu e un repository valid ies
-	cd $repository || exit 1
-	# deplasez parametrii la stanga
-	shift
-	# presupun initial ca numarul maxim de commituri nu va fi dat ca parametru
-	# si ii dau valoarea -1, git log -n -1 afiseaza toate commiturile
-	maxcommits="-1"
-	# daca se specifica optiunea -n
-	if [[ "$1" == "-n" ]];then
-		# trebuie sa am cel putin 3 parametri
-		[[ $# -lt 3 ]] && exit 1
-		# numarul maxim de commituri
-		maxcommits="$2"
-		# deplasez cu 2 pozitii parametrii la stanga
-		shift 2
-	fi
-	# primul parametru ramas este operatia
-	operation="$1"
-	shift
-	case "$operation" in
-		"top_contributors")
-			# calculez statistica top_contributors
-			top_contributors $maxcommits $@
-			;;
-		"added_lines")
-			# calculez statistica added_lines
-			lines added $maxcommits $@
-			;;
-		"deleted_lines")
-			# calculez statistica deleted_lines
-			lines deleted $maxcommits $@
-			;;
-		"touched_files")
-			# calculez statistica touched files
-			touched_files $maxcommits $@
-			;;
-		"diff_branches")
-			# calculez statistica diff_branches
-			diff_branches $@
-			;;
-		*)
-			exit 1;;
-	esac
-}
-
-main $@
+# daca nu sunt cel putin ies
+[[ $# -lt 2 ]] && exit 1
+repository="$1"
+# daca nu e un repository valid ies
+cd "$repository" &>/dev/null || exit 1
+# deplasez parametrii la stanga
+shift
+# presupun initial ca numarul maxim de commituri nu va fi dat ca parametru
+# si ii dau valoarea -1, git log -n -1 afiseaza toate commiturile
+maxcommits="-1"
+# daca se specifica optiunea -n
+if [[ "$1" == "-n" ]];then
+	# trebuie sa am cel putin 3 parametri
+	[[ $# -lt 3 ]] && exit 1
+	# numarul maxim de commituri
+	maxcommits="$2"
+	# deplasez cu 2 pozitii parametrii la stanga
+	shift 2
+fi
+# primul parametru ramas este operatia
+operation="$1"
+shift
+case "$operation" in
+	"top_contributors")
+		# calculez statistica top_contributors
+		top_contributors $maxcommits "$1"
+		;;
+	"added_lines")
+		# calculez statistica added_lines
+		lines added $maxcommits "$1"
+		;;
+	"deleted_lines")
+		# calculez statistica deleted_lines
+		lines deleted $maxcommits "$1"
+		;;
+	"touched_files")
+		# calculez statistica touched files
+		touched_files $maxcommits "$1"
+		;;
+	"diff_branches")
+		# calculez statistica diff_branches
+		diff_branches $@
+		;;
+	*)
+		exit 1;;
+esac

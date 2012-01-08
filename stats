@@ -67,16 +67,17 @@ _process_lines() {
 		shift
 	fi
 	# daca sunt 2 argumente atunci avem fisierul si operatia : 1 - added, 2 - deleted
-	if [[ "$#" -eq 2 ]]; then
-		GFILE=" $1"
-		shift
+	if [[ "$#" -eq 2 && -n "$2" ]]; then
+		GFILE="$2"
+	else
+		GFILE=".*"
 	fi
 
 	TMPFILE=$(mktemp)
 	# ma asigur ca sunt pe master
 	git checkout master > /dev/null 2>&1
 	# numarul de linii modificate pentru fiecare fisier
-	git log $MAXCOMMITOPS  --numstat | sed -e 's/\t/ /g' | grep -E "^[[:digit:]].*$GFILE" | cut -f $1 -d " " > $TMPFILE
+	git log $MAXCOMMITOPS  --numstat | sed -e 's/\t/ /g' | grep -E "^(([[:digit:]]+) ){2}$GFILE$" | cut -f $1 -d " " > $TMPFILE
 	# calculez suma
 	sum=0
 	while read nr; do
@@ -87,7 +88,6 @@ _process_lines() {
 }
 
 _touched_files() {
-
 	# daca avem limitare la numarul de commituri
 	if [[ "$1" == "-c" ]]; then
 		shift
@@ -102,11 +102,15 @@ _touched_files() {
     # ma asigur ca sunt pe master
 	git checkout master > /dev/null 2>&1
 	TMPFILE=$(mktemp)
+	TMPFILE2=$(mktemp)
 	# caut fisierele "atinse"
-	git log  $MAXCOMMITOPTS --author=$AUTHOR --name-status | grep -e ^[MAD][[:space:]] | sed -e 's/\t/ /g' | cut -f 2 -d " " > $TMPFILE
+	git log  $MAXCOMMITOPTS --author="$AUTHOR" --name-status | grep -e ^[MAD][[:space:]] | sed -e 's/\t/ /g' > $TMPFILE
 	# elimin duplicatele
-	cat $TMPFILE | sort -u | wc -l
-	rm $TMPFILE
+	while read state file; do
+		echo $file >> $TMPFILE2
+	done<$TMPFILE
+	cat $TMPFILE2 | sort -u | wc -l
+	rm $TMPFILE $TMPFILE2
 
 }
 
@@ -134,11 +138,11 @@ _diff_branches() {
 	TMPFILE4=$(mktemp)                                                     
 
 	# afisez in fisierul 1 toate hashurile commiturile de pe primul branch
-	git checkout -f $1 >/dev/null 2>&1
+	git checkout "$1" >/dev/null 2>&1
 	git log | grep ^commit | cut -f 2 -d " " > $TMPFILE1
 
 	# afisez in fisierul 2 toate hashurile commiturile de pe al doilea branch
-	git checkout -f $2 >/dev/null 2>&1
+	git checkout "$2" >/dev/null 2>&1
 	git log | grep ^commit | cut -f 2 -d " " > $TMPFILE2
 
 	# commiturile doar din primul branch merg in fis.3
@@ -180,15 +184,15 @@ fi
 
 OP=$2
 
-[[ -d $REPO ]] && cd $REPO || exit 3
+[[ -d "$REPO" ]] && cd "$REPO" || exit 3
 
 case $OP in
 	"top_contributors")
 		_top_contributors $COMMOPTS $3;;
 	"added_lines")
-		_process_lines $COMMOPTS $3 1;;
+		_process_lines $COMMOPTS 1 "$3";;
 	"deleted_lines")
-		_process_lines $COMMOPTS $3 2;;
+		_process_lines $COMMOPTS 2 "$3";;
 	"touched_files")
 		_touched_files $COMMOPTS $3;;
 	"diff_branches")
